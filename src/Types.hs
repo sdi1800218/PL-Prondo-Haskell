@@ -1,14 +1,5 @@
 module Types where
 
-{- TODO -}
-{- Recommended type signatures for functions "transform" and "eval": -}
-
--- Transforms a MiniHaskell program into an intensional one.
--- transform :: FProgram -> IProgram
-
--- Evaluates an intensional program and returns the resulting expression.
--- eval :: IProgram -> IExpr
-
 {---------------- Functional Types ----------------}
 
 -- AST representation of the source language (a small subset of Haskell).
@@ -17,9 +8,9 @@ type FProgram = (FExpr, [FDefinition])
 
 -- FDefinition consists of the following triplet:
 --      (Function Name, [Typical Parameters], AST Representation of Assigned Expression)
+type FDefinition = (String, [String], FExpr)
 -- Example: the function definition "foo(x, y) = x + y" is parsed into
 --      ("foo", ["x", "y"], (FBinaryOp Plus (FVar "x") (FVar "y")).
-type FDefinition = (String, [String], FExpr)
 
 -- FExpr contains the AST representation of the expression assigned in the "result" function.
 data FExpr
@@ -42,9 +33,9 @@ type IProgram = [IDefinition]
 
 -- IDefinition consists of the pair:
 --      (Function Name, AST Representation of Intensional Expression)
+type IDefinition = (String, IExpr)
 -- Example: the function definition "foo = x + y" is parsed into
 --      ("foo", (IBinaryOp Plus (IVar "x") (IVar "y")).
-type IDefinition = (String, IExpr)
 
 -- IEnv represents the "tags" environment variable to be used by the Intensional evaluator.
 type IEnv = [Int]
@@ -56,7 +47,7 @@ data IExpr
         | IParens IExpr
         | IIfThenElse IExpr IExpr IExpr
         | ICall Int String
-        | IActuals [IExpr]
+        | IActuals [IExpr] -- this is the only extra
         | ICompOp OpCompare IExpr IExpr
         | IBinaryOp OpBinary IExpr IExpr
         | IBooleanOp OpBool IExpr IExpr
