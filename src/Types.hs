@@ -47,7 +47,7 @@ data IExpr
         | IParens IExpr
         | IIfThenElse IExpr IExpr IExpr
         | ICall Int String
-        | IActuals [IExpr] -- this is the only extra
+        | IActuals [IExpr]
         | ICompOp OpCompare IExpr IExpr
         | IBinaryOp OpBinary IExpr IExpr
         | IBooleanOp OpBool IExpr IExpr
