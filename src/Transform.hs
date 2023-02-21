@@ -5,10 +5,11 @@ getActuals, paramParse) where
 import Types
 import Control.Monad.State
 import Data.Char
+import Data.Map(fromListWith, toList)
 
 type Symbol = (String, Int)
 
-{-
+{- This didn't pan out;
 instance Functor FExpr where
     fmap f (FVar var)   = f (FVar Var)
     fmap f (FNum num)   = f (FNum num)
@@ -16,7 +17,7 @@ instance Functor FExpr where
     --fmap f () = Node (f x) (fmap f leftsub) (fmap f rightsub)
 -}
 
--- TODO
+-- Looks clean
 transform :: FProgram -> IProgram
 transform fp = do
 
@@ -34,7 +35,7 @@ transform fp = do
     let actuals = getActuals fpEnum symbols
 
     -- 5. Augment IProgram with them
-    ip:actuals
+    ip ++ actuals
 
 -- Traverse one FDefinition at the time and scrap args
 -- For every FExpr inside an FCall's args, extract the stuff into
@@ -53,7 +54,7 @@ getActuals fpEnum (symbol:symbols) = do
 
     -- 2. Then merge the results
     -- ALTERNATIVE: make a recursive function that computes the structure properly.
-    let currActuals = (mergeActuals roughActuals)
+    let currActuals = (mergeIDefs roughActuals)
 
     -- 3. Recursively find the rest of the actuals for the other functions
     currActuals ++ (getActuals fpEnum symbols)
@@ -70,28 +71,98 @@ paramParse fexpr (func, params) = do
     --      we want to recurse into them in order.
     --      Like: get all params from 1st, then from 2nd, etc..
     let actual = do
+        -- a. map the fcalls
         fcall <- fcalls
-        
+
+        -- b. traverse each one
+        -- the result is gonna be an array with the args of every function call
+        -- i.e [[args0], [args1], [args2]]
+        let dirty = traverseFCall func fcall
+
+        -- We need to map the symbols with the indexes of this array
+        let zippedUp = map (zip params) dirty
+
+        -- Now we can just scrap (param, IExpr) pairs
+        let finalOne0 = do
+            param <- params
+            let actuals = do
+                internal <- zippedUp
+                [snd elem | elem <- internal, (fst elem) == param]
+
+            return (param, (actualsCast actuals))
+
+        map idefCast finalOne0
+
+    actual
+
+
+mergeActuals :: [IExpr] -> [IExpr] -> [IExpr]
+mergeActuals actuals1 actuals2 = (actuals2 ++ actuals1)
 
 -- For every symbol reduce all the duplicates into a single array
-mergeActuals :: [IDefinition] -> [IDefinition]
-mergeActuals [] = []
-mergeActuals list = list
---TODO
+mergeIDefs :: [(String, IExpr)] -> [(String, IExpr)]
+mergeIDefs []      = []
+mergeIDefs idefs   = do
+    let result = toList (fromListWith (mergeActuals) (map stripIActuals idefs))
+    map recoverIActuals result
 
--- Returns an array of IExpr per function call, in proper order
+-- Returns an array of [args] per function call
 traverseFCall :: String -> FExpr -> [[IExpr]]
 traverseFCall function fexpr =
     case fexpr of
-        -- 1. If we match another FCall we save it's args
-        -- and then recurse deeper into them to find possibly more FCalls
+        -- 1. TODO
         FCall func args -> if (function == (extractFunc func))
-                            then [(fExprToIexpr fexpr)]--(map fExprToIexpr args)
-                                -- ++ (concat [traverseFCall arg | arg <- args ])
+                            -- get params
+                            then [(map fExprToIexpr args)]
+                                ++ concat ((map (traverseFCall function) args))
+                            -- dont get, but check children
                             else
-                                (concat [traverseFCall arg | arg <- args ])
+                                concat ((map (traverseFCall function) args))
+
         -- 2. Here we assume that an FCall will have only primitives as nodes.
-        fexpr           -> [fExprToIexpr fexpr]
+        FVar var                    -> [[]]
+        FNum num                    -> [[]]
+        FBool bull                  -> [[]]
+
+        -- 3. Avoid shenanigans from smart [people]
+        FParens expr                -> (traverseFCall function expr)
+        FIfThenElse cond aff neg    -> (traverseFCall function cond)
+                                            ++ (traverseFCall function aff)
+                                            ++ (traverseFCall function neg)
+
+        FUnaryOp op expr            -> (traverseFCall function expr)
+        FCompOp op expr1 expr2      -> (traverseFCall function expr1)
+                                            ++ (traverseFCall function expr2)
+        FBinaryOp op expr1 expr2    -> (traverseFCall function expr1)
+                                            ++ (traverseFCall function expr2)
+        FBooleanOp op expr1 expr2   -> (traverseFCall function expr1)
+                                            ++ (traverseFCall function expr2)
+
+-- TODO
+extractPrimitives :: FExpr -> [IExpr]
+extractPrimitives fexpr =
+    case fexpr of
+
+    -- First the simple nodes
+        FVar var                    -> [fExprToIexpr fexpr]
+        FNum num                    -> [fExprToIexpr fexpr]
+        FBool bull                  -> [fExprToIexpr fexpr]
+
+    -- Then the recursives
+        FCall func args              -> [fExprToIexpr fexpr]
+
+        FParens expr                -> [] ++ (extractPrimitives expr)
+        FIfThenElse cond aff neg    -> [] ++ (extractPrimitives cond)
+                                          ++ (extractPrimitives aff)
+                                          ++ (extractPrimitives neg)
+
+        FUnaryOp op expr            -> [] ++ (extractPrimitives expr)
+        FCompOp op expr1 expr2      -> [] ++ (extractPrimitives expr1)
+                                            ++ (extractPrimitives expr2)
+        FBinaryOp op expr1 expr2    -> [] ++ (extractPrimitives expr1)
+                                            ++ (extractPrimitives expr2)
+        FBooleanOp op expr1 expr2   -> [] ++ (extractPrimitives expr1)
+                                            ++ (extractPrimitives expr2)
 
 -- extractFCall: TODO
 extractFCall :: FExpr -> [FExpr]
@@ -104,7 +175,7 @@ extractFCall fexpr =
         FBool bull                  -> []
 
     -- Then the recursives
-        FCall func args              -> args
+        FCall func args              -> [fexpr]
 
         FParens expr                -> [] ++ (extractFCall expr)
         FIfThenElse cond aff neg    -> [] ++ (extractFCall cond)
@@ -282,14 +353,16 @@ enum (fexpr, state) = do
                                 let exp = (enum (expr, state))
                                 ((FParens (fst exp)), (snd exp))
 
-        -- TODO
-        {-FIfThenElse cond aff neg    -> (FIfThenElse (enum cond)
-                                                    (enum aff)
-                                                    (enum neg)
-                                        )
-        -}
+        FIfThenElse cond aff neg    -> do
+                                    -- A. Relay work
+                                    let (left,middle,right,newState) = android3(cond,aff,neg,state)
 
-        -- FUnaryOp op expr         -> (FUnaryOp op (map mutt expr))
+                                    -- B. Reconstruct FExpr and combine with the state
+                                    ((FIfThenElse (left) (middle) (right)), newState)
+
+        FUnaryOp op expr         -> do
+                                let exp = (enum (expr, state))
+                                ((FUnaryOp op (fst exp)), (snd exp))
         FCompOp op expr1 expr2   -> do
                                 -- A. Relay work
                                 let (left, right, newState) = android (expr1, expr2, state)
@@ -310,6 +383,35 @@ enum (fexpr, state) = do
 
                                 -- B. Reconstruct FExpr and combine with the state
                                 ((FBooleanOp op left right), newState)
+
+-- android3: encapsulates stuff that would need to be repeated
+android3 :: (FExpr, FExpr,FExpr, Symbol) -> (FExpr, FExpr, FExpr, Symbol)
+android3 (expr1, expr2, expr3, state) = do
+
+    -- A. Compute the left fexpr
+    let left = (enum (expr1, state));
+    let leftFExpr = (fst left)
+
+    -- B. Recompute state
+    let newState = (snd left);
+
+    -- C. Now compute the middle with the altered state
+    let middle = (enum (expr2, newState));
+    let middleFExpr = (fst middle)
+
+    -- D. Recompute or what
+    let newerState = (snd middle)
+
+    -- E. Now compute the right
+    let right = (enum (expr3, newerState));
+    let rightFExpr = (fst right)
+
+    -- F. No state, no party
+    let newestState = (snd right)
+
+    -- H. Ret-a-quaple
+    (leftFExpr, middleFExpr, rightFExpr, newestState)
+
 
 -- android: encapsulates stuff that would need to be repeated
 android :: (FExpr, FExpr, Symbol) -> (FExpr, FExpr, Symbol)
@@ -480,9 +582,23 @@ plusOne n = execState iter n
 
 
 {---------------- Helpers ----------------}
+-- Mazepse an IExpr == IActuals [IExpr] object
+recoverIActuals :: (String, [IExpr]) -> (String, IExpr)
+recoverIActuals (var, actuals) = (var, (IActuals actuals))
+
+-- Expand an IExpr == IActuals [IExpr] object
+stripIActuals :: (String, IExpr) -> (String, [IExpr])
+stripIActuals (var, actuals) = case actuals of
+    IActuals expr -> (var, expr)
 
 fdefCast :: (String, [String], FExpr) -> FDefinition
 fdefCast fdef = fdef
+
+idefCast :: (String, IExpr) -> IDefinition
+idefCast idef = idef
+
+actualsCast :: [IExpr] -> IExpr
+actualsCast exprs = (IActuals exprs)
 
 programCast :: FExpr -> [FDefinition] -> FProgram
 programCast a b = (a, b)
