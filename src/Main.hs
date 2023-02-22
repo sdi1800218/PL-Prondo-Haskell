@@ -1,6 +1,6 @@
 {-
     Usage: <Main> < input.txt
-    TODO: Tests as per haskell-in-haskell
+    TODO: Tests
 -}
 
 module Main where
@@ -17,7 +17,6 @@ main = do
     contents <- getContents
 
     case programParser contents of
-        -- TODO
         Left err -> error "> Parse Error"
         Right fp ->
             do
@@ -30,10 +29,11 @@ main = do
 
                 -- Print the Eval
                 putStrLn "\n\n> Result is:"
-                --case eval (transform fp) of
-                --    INum n -> print n
-                --    IBool b -> print b
-                --    _ -> error "> Runtime Error"
+                case eval (transform fp) of
+                    INum n -> print n
+                    IBool b -> print b
+                    -- They get printed in the eval loop
+                    --_ -> error "> Runtime Error"
 
 -- Extract FP from a Left|Right
 fromRight :: (Either ParseError FProgram) -> FProgram

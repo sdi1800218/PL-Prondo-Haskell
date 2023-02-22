@@ -1,49 +1,257 @@
-module Intensional (eval, evaluate, calculate) where
+module Intensional (eval, evaluate1) where
 
 import Types
 import Debug.Trace
 
-{-
-Μηχανισμός Εκτέλεσης
-
-Αφού μεταφραστεί το πηγαίο πρόγραμμα σε νοηματικό κώδικα, μπορεί πλέον να εκτελεστεί για να παράξει το
-επιθυμητό αποτέλεσμα.
-
-Για αυτό τον σκοπό, πρέπει αρχικά να ορίσουμε την σημασιολογία των τελεστών call και
-actuals. Το ακόλουθο μοντέλο αποδεικνύεται ότι είναι επαρκές, για την αποτίμηση νοηματικών προγραμμάτων:
-
-• Ο τελεστής calli επαυξάνει μία λίστα w, προσαρτώντας το i στην κεφαλή της:
-    (calli a)(w) = a(i : w).
-
-• Ο τελεστής actuals παίρνει τον αριθμοδείκτη i στην κεφαλή μίας λίστας,
-    και τον χρησιμοποιεί για να επιλέξει το i-οστό της στοιχείο:
-    (actuals(a0 , ..., an−1 ))(i : w) = (ai )(w).
-
-Συνδυάζοντας τη σημασιολογία των call και actuals με τους κανόνες αποτίμησης εκφράσεων που φαίνονται
-παρακάτω, μπορούμε πλέον να εκτελέσουμε ένα πρόγραμμα σε νοηματικό κώδικα.
-
-1 EVAL(E1 BinaryOp E2, tags) = EVAL(E1, tags) BinaryOp EVAL(E2, tags)
-
-2 EVAL(if B then E1 else E2, tags) = if EVAL(B, tags) then EVAL(E1, tags) else EVAL(E2, tags)
-
-3 EVAL(constant, tags) = constant
-
-4 EVAL((E1), tags) = EVAL(E1, tags)
-
-5 EVAL(UnaryOp E, tags) = UnaryOp EVAL(E, tags)
-
--}
-
--- TODO: Doc
--- Hint: The valid return values are INum and IBool
+-- eval: is a wrapper around evaluate1().
+--      it feeds parameters properly into evaluate1()
+--      to calculate the result of our program.
 eval :: IProgram -> IExpr
 eval ip = do
+    -- 1. Map "result" expression
     let resultVar = snd (head ip)
-    let resultEval = (evaluate resultVar ip [])
-    let res = calculate resultEval
-    case res of
+
+    -- 2. Run it
+    let resultEval = (evaluate1 resultVar ip [])
+
+    -- 3. Check the result type and return
+    case resultEval of
         Left num    -> (INum num)
         Right bull  -> (IBool bull)
+        -- error case, return jibberish
+        resultEval  -> (IActuals [])
+
+-- evaluate1: Applies semantics and semntic rules to the IProgram
+--            to recursively simplify expressions and derive primitives,
+--            on which it operates.
+evaluate1 :: IExpr -> [IDefinition] -> IEnv -> (Either Int Bool)
+evaluate1 iexpr idefs env = do
+    let x = trace("Call :: evaluate" ++ show iexpr)
+    case iexpr of
+        -- Primitives
+        INum    num     -> Left num
+        IBool   bull    -> Right bull
+
+        {-
+        We got no assignments,
+        so a var can only be a typical parameter (aka idef -> IActuals entry)
+        -}
+        IVar    var     -> do
+                            let switch = (lookMeUp var idefs)
+                            (evaluate1 switch idefs env)
+
+        -- Works according to semantics provided
+        IActuals    iexprs       -> do
+                                    let index = (head env)
+                                    let newEnv = (drop 1 env)
+                                    let selection = (iexprs!!index)
+                                    (evaluate1 selection idefs newEnv)
+
+        -- Lookup the symbol and augment the env, also due to semantics
+        ICall       num symbol   -> do
+                                    let switch = (lookMeUp symbol idefs)
+                                    (evaluate1 switch idefs (num:env))
+
+
+        {-
+            This is a tricky one.
+            First calculate the expression of the condition,
+            then choose which expression to calculate.
+            This way we save ourselves from dragons.
+        -}
+        IIfThenElse cond aff neg ->
+            do
+                -- cond1 :: Boolean
+                let cond1   = (evaluate1 cond idefs env)
+                let strip1  = case cond1 of
+                                Left num    -> error (runtime 1)
+                                Right bool  -> bool
+
+                -- Check our cond and calc only the needed one
+                if strip1
+                    -- aff :: either
+                    then (evaluate1 aff idefs env)
+                    -- neg :: either
+                    else (evaluate1 neg idefs env)
+
+        -- Simply skip parens
+        IParens expr        -> (evaluate1 expr idefs env)
+
+        -- Another tricky one
+        IUnaryOp op expr    ->
+            do
+                -- Eval the result
+                let res = (evaluate1 expr idefs env)
+
+                -- Then cast accordingly
+                case op of
+                    -- NOTE: For an Int to do Positive it's like the Id trans,
+                    -- since: +(-2) == -2, +(2) == 2. Maybe abs() should be done.
+                    -- Int
+                    Positive ->
+                        case res of
+                            Left num    -> Left num
+                            Right bool  -> Right (error (runtime 2))
+                    -- Int
+                    Negative -> case res of
+                                    Left num    -> Left (negate num)
+                                    Right bool  -> Right (error (runtime 3))
+                    -- Bool
+                    Not      -> case res of
+                                    Left num    -> Left (error (runtime 4))
+                                    Right bool  -> Right (not bool)
+
+        -- TODO
+        ICompOp op expr1 expr2      ->
+            do
+                -- expr1 :: Either
+                let res1 = (evaluate1 expr1 idefs env)
+                let strip1  = case res1 of
+                                    Left num    -> num
+                                    Right bool  -> (error (runtime 5))
+                -- expr2 :: Either
+                let res2 = (evaluate1 expr2 idefs env)
+                let strip2  = case res2 of
+                                    Left num    -> num
+                                    Right bool  -> (error (runtime 5))
+                -- eval, ret
+                case op of
+                        LtEq     -> Right (strip1 <= strip2)
+                        Lt       -> Right (strip1 < strip2)
+                        GtEq     -> Right (strip1 >= strip2)
+                        Gt       -> Right (strip1 > strip2)
+                        -- TODO: these must work for Booleans as well
+                        Eq       -> Right (strip1 == strip2)
+                        Neq      -> Right (strip1 /= strip2)
+
+        -- TODO
+        IBinaryOp op expr1 expr2    ->
+            do
+                -- expr1 :: Int
+                let res1 = (evaluate1 expr1 idefs env)
+                let strip1  = case res1 of
+                                    Left num    -> num
+                                    Right bool  -> (error (runtime 6))
+                -- expr2 :: Int
+                let res2 = (evaluate1 expr2 idefs env)
+                let strip2  = case res2 of
+                                    Left num    -> num
+                                    Right bool  -> (error (runtime 6))
+                case op of
+                        Plus    -> Left (strip1 + strip2)
+                        Mult    -> Left (strip1 * strip2)
+                        Minus   -> Left (strip1 - strip2)
+                        Div     -> Left (handleDivision strip1 strip2)
+
+        -- TODO
+        IBooleanOp op expr1 expr2   ->
+            do
+                -- expr1 :: Boolean
+                let res1    = (evaluate1 expr1 idefs env)
+                let strip1  = case res1 of
+                                    Left num    -> (error (runtime 7))
+                                    Right bool  -> bool
+                -- expr2 :: Boolean
+                let res2    = (evaluate1 expr2 idefs env)
+                let strip2  = case res2 of
+                                    Left num    -> (error (runtime 7))
+                                    Right bool  -> bool
+                case op of
+                        And     -> Right (strip1 && strip2)
+                        Or      -> Right (strip1 || strip2)
+
+-- lookMeUp: Fetches symbol IExprs from the IDefs
+lookMeUp :: String -> [IDefinition] -> IExpr
+-- if it dont exist, we got problems.
+lookMeUp symbol (idef:idefs) | symbol == (fst idef)   = (snd idef)
+                             | otherwise              = (lookMeUp symbol idefs)
+
+-- handleDivision: Throws exception if div by zero, floors down the result.
+handleDivision :: Int -> Int -> Int
+handleDivision a 0 = error (runtime 8)
+handleDivision a b = (div a b)
+
+-- Runtime Error Directives
+runtime :: Int -> String
+runtime num = do
+    let prefix = "> Runtime Error: "
+    case num of
+        1 -> (prefix ++ "If Condition not Boolean")
+        2 -> (prefix ++ "UnaryOp Positive with Boolean")
+        3 -> (prefix ++ "UnaryOp Negative with Boolean")
+        4 -> (prefix ++ "UnaryOp Not with Integer")
+        5 -> (prefix ++ "CompOp Operand not Integer")
+        6 -> (prefix ++ "BinaryOp Operand not Integer")
+        7 -> (prefix ++ "BooleanOp Operand not Boolean")
+        8 -> (prefix ++ "Division by zero")
+
+{- Initial implementation that first simplified expressions,
+    and then calculated the expression of primitives.
+   Failed because of recursive calls, such as fib_fact input.
+
+-- TODO: Doc
+calculate :: IExpr -> (Either Int Bool)
+calculate simpleIP =
+    case simpleIP of
+
+        -- Them leaves
+        INum num    -> Left num
+        IBool bull  -> Right bull
+
+        IParens expr    -> (calculate expr)
+
+        -- TODO
+        -- IUnaryOp
+        -- IIfThenElse
+
+        -- Works on Ints
+        IBinaryOp op expr1 expr2    -> do
+                                        let res1    = (calculate expr1)
+                                        let strip1  = case res1 of
+                                                        Left num    -> num
+                                                        Right bool  -> error "oops"
+                                        let res2    = (calculate expr2)
+                                        let strip2  = case res2 of
+                                                        Left num    -> num
+                                                        Right bool  -> error "oops"
+                                        case op of
+                                            Plus    -> Left (strip1 + strip2)
+                                            Mult    -> Left (strip1 * strip2)
+                                            Minus   -> Left (strip1 - strip2)
+                                            -- TODO: Div     -> Left (handleDivision strip1 strip2)
+
+        -- Works on Booleans
+        IBooleanOp op expr1 expr2   -> do
+                                        let res1 = (calculate expr1)
+                                        let strip1  = case res1 of
+                                                        Left num    -> error "oops"
+                                                        Right bool  -> bool
+                                        let res2 = (calculate expr2)
+                                        let strip2  = case res2 of
+                                                        Left num    -> error "oops"
+                                                        Right bool  -> bool
+                                        case op of
+                                            And     -> Right (strip1 && strip2)
+                                            Or      -> Right (strip1 || strip2)
+
+        -- Works on Ints, but returns Boolean
+        ICompOp op expr1 expr2      -> do
+                                        let res1 = (calculate expr1)
+                                        let strip1  = case res1 of
+                                                        Left num    -> num
+                                                        Right bool  -> error "oops"
+                                        let res2 = (calculate expr2)
+                                        let strip2  = case res2 of
+                                                        Left num    -> num
+                                                        Right bool  -> error "oops"
+                                        case op of
+                                            LtEq     -> Right (strip1 <= strip2)
+                                            Lt       -> Right (strip1 < strip2)
+                                            GtEq     -> Right (strip1 >= strip2)
+                                            Gt       -> Right (strip1 > strip2)
+                                            Eq       -> Right (strip1 == strip2)
+                                            Neq      -> Right (strip1 /= strip2)
+
 
 -- TODO: Doc
 evaluate :: IExpr -> [IDefinition] -> IEnv -> IExpr
@@ -91,71 +299,4 @@ evaluate iexpr idefs env = do
                                     let res1 = (evaluate expr1 idefs env)
                                     let res2 = (evaluate expr2 idefs env)
                                     (IBooleanOp op res1 res2)
-
--- TODO: Doc
-calculate :: IExpr -> (Either Int Bool)
-calculate simpleIP =
-    case simpleIP of
-
-        -- Them leaves
-        INum num    -> Left num
-        IBool bull  -> Right bull
-
-        IParens expr    -> (calculate expr)
-
-        -- TODO
-        -- IUnaryOp
-        -- IIfThenElse
-
-        -- Works on Ints
-        IBinaryOp op expr1 expr2    -> do
-                                        let res1    = (calculate expr1)
-                                        let strip1  = case res1 of
-                                                        Left num    -> num
-                                                        Right bool  -> error "oops"
-                                        let res2    = (calculate expr2)
-                                        let strip2  = case res2 of
-                                                        Left num    -> num
-                                                        Right bool  -> error "oops"
-                                        case op of
-                                            Plus    -> Left (strip1 + strip2)
-                                            Mult    -> Left (strip1 * strip2)
-                                            Minus   -> Left (strip1 - strip2)
-                                            --Div     -> Left (handleDivision strip1 strip2)
-
-        -- Works on Booleans
-        IBooleanOp op expr1 expr2   -> do
-                                        let res1 = (calculate expr1)
-                                        let strip1  = case res1 of
-                                                        Left num    -> error "oops"
-                                                        Right bool  -> bool
-                                        let res2 = (calculate expr2)
-                                        let strip2  = case res2 of
-                                                        Left num    -> error "oops"
-                                                        Right bool  -> bool
-                                        case op of
-                                            And     -> Right (strip1 && strip2)
-                                            Or      -> Right (strip1 || strip2)
-
-        -- Works on Ints, but returns Boolean
-        ICompOp op expr1 expr2      -> do
-                                        let res1 = (calculate expr1)
-                                        let strip1  = case res1 of
-                                                        Left num    -> num
-                                                        Right bool  -> error "oops"
-                                        let res2 = (calculate expr2)
-                                        let strip2  = case res2 of
-                                                        Left num    -> num
-                                                        Right bool  -> error "oops"
-                                        case op of
-                                            LtEq     -> Right (strip1 <= strip2)
-                                            Lt       -> Right (strip1 < strip2)
-                                            GtEq     -> Right (strip1 >= strip2)
-                                            Gt       -> Right (strip1 > strip2)
-                                            Eq       -> Right (strip1 == strip2)
-                                            Neq      -> Right (strip1 /= strip2)
-
-lookMeUp :: String -> [IDefinition] -> IExpr
--- if it dont exist, we got problems.
-lookMeUp symbol (idef:idefs) | symbol == (fst idef)   = (snd idef)
-                             | otherwise              = (lookMeUp symbol idefs)
+-}
