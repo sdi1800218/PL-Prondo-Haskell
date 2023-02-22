@@ -3,6 +3,8 @@ module Intensional (eval, evaluate1) where
 import Types
 import Debug.Trace
 
+{------------------------------ Implementation ------------------------------}
+
 -- eval: is a wrapper around evaluate1().
 --      it feeds parameters properly into evaluate1()
 --      to calculate the result of our program.
@@ -18,15 +20,16 @@ eval ip = do
     case resultEval of
         Left num    -> (INum num)
         Right bull  -> (IBool bull)
+
         -- error case, return jibberish
-        resultEval  -> (IActuals [])
+        -- resultEval  -> (IActuals [])
 
 -- evaluate1: Applies semantics and semntic rules to the IProgram
 --            to recursively simplify expressions and derive primitives,
 --            on which it operates.
 evaluate1 :: IExpr -> [IDefinition] -> IEnv -> (Either Int Bool)
 evaluate1 iexpr idefs env = do
-    let x = trace("Call :: evaluate" ++ show iexpr)
+    let x = trace("Call :: evaluate" ++ show iexpr) -- not used
     case iexpr of
         -- Primitives
         INum    num     -> Left num
@@ -86,7 +89,7 @@ evaluate1 iexpr idefs env = do
                 -- Then cast accordingly
                 case op of
                     -- NOTE: For an Int to do Positive it's like the Id trans,
-                    -- since: +(-2) == -2, +(2) == 2. Maybe abs() should be done.
+                    -- since: +(-2) == -2, +(2) == 2.
                     -- Int
                     Positive ->
                         case res of
@@ -101,30 +104,43 @@ evaluate1 iexpr idefs env = do
                                     Left num    -> Left (error (runtime 4))
                                     Right bool  -> Right (not bool)
 
-        -- TODO
+        -- Computes expressions and then combines them according to the Op
+        -- It's ugly, because it must work for different stuff.
+        -- Eq and Neq are for both types, the rest only for Ints.
         ICompOp op expr1 expr2      ->
             do
-                -- expr1 :: Either
+                {- expr1 :: Either, expr2 :: Either -}
                 let res1 = (evaluate1 expr1 idefs env)
-                let strip1  = case res1 of
-                                    Left num    -> num
-                                    Right bool  -> (error (runtime 5))
-                -- expr2 :: Either
                 let res2 = (evaluate1 expr2 idefs env)
-                let strip2  = case res2 of
-                                    Left num    -> num
-                                    Right bool  -> (error (runtime 5))
-                -- eval, ret
-                case op of
-                        LtEq     -> Right (strip1 <= strip2)
-                        Lt       -> Right (strip1 < strip2)
-                        GtEq     -> Right (strip1 >= strip2)
-                        Gt       -> Right (strip1 > strip2)
-                        -- TODO: these must work for Booleans as well
-                        Eq       -> Right (strip1 == strip2)
-                        Neq      -> Right (strip1 /= strip2)
 
-        -- TODO
+                case res1 of
+                    Left num1    ->
+                        case res2 of
+                            -- Different types of operands.
+                            Right bool2 -> (error (runtime 9))
+
+                            Left num2   ->
+                                -- We matched 2 Ints, all applicable.
+                                case op of
+                                    LtEq    -> Right (num1 <= num2)
+                                    Lt      -> Right (num1 < num2)
+                                    GtEq    -> Right (num1 >= num2)
+                                    Gt      -> Right (num1 > num2)
+                                    Eq      -> Right (num1 == num2)
+                                    Neq     -> Right (num1 /= num2)
+
+                    Right bool1  ->
+                        case res2 of
+                            -- Different types of operands.
+                            Left num2  -> (error (runtime 9))
+
+                            Right bool2 ->
+                                -- We matched 2 Booleans, only Eq and Neq.
+                                case op of
+                                    Eq  -> Right (bool1 == bool2)
+                                    Neq -> Right (bool1 /= bool2)
+
+        -- Computes expressions and then combines them according to the Op
         IBinaryOp op expr1 expr2    ->
             do
                 -- expr1 :: Int
@@ -143,7 +159,7 @@ evaluate1 iexpr idefs env = do
                         Minus   -> Left (strip1 - strip2)
                         Div     -> Left (handleDivision strip1 strip2)
 
-        -- TODO
+        -- Computes expressions and then combines them according to the Op
         IBooleanOp op expr1 expr2   ->
             do
                 -- expr1 :: Boolean
@@ -174,7 +190,7 @@ handleDivision a b = (div a b)
 -- Runtime Error Directives
 runtime :: Int -> String
 runtime num = do
-    let prefix = "> Runtime Error: "
+    let prefix = "\n> Runtime Error: "
     case num of
         1 -> (prefix ++ "If Condition not Boolean")
         2 -> (prefix ++ "UnaryOp Positive with Boolean")
@@ -184,12 +200,15 @@ runtime num = do
         6 -> (prefix ++ "BinaryOp Operand not Integer")
         7 -> (prefix ++ "BooleanOp Operand not Boolean")
         8 -> (prefix ++ "Division by zero")
+        9 -> (prefix ++ "UnaryOp Operand Type Mismatch")
+
+{------------------------------ Vault ------------------------------}
 
 {- Initial implementation that first simplified expressions,
     and then calculated the expression of primitives.
    Failed because of recursive calls, such as fib_fact input.
 
--- TODO: Doc
+-- Doc
 calculate :: IExpr -> (Either Int Bool)
 calculate simpleIP =
     case simpleIP of
@@ -299,4 +318,21 @@ evaluate iexpr idefs env = do
                                     let res1 = (evaluate expr1 idefs env)
                                     let res2 = (evaluate expr2 idefs env)
                                     (IBooleanOp op res1 res2)
+
+-- sameEither: Checks if two Either objects are the same Either
+sameEither :: (Either Int Bool) -> (Either Int Bool) -> Bool
+sameEither a b = case a of
+                    Left num    -> case b of
+                                    Left num    -> True
+                                    Right bool  -> False
+                    Right bool  -> case b of
+                                    Left num    -> False
+                                    Right bool  -> True
+
+intEither :: (Either Int Bool) -> (Either Int Bool) -> Bool
+intEither a b = case a of
+                    Left num    -> case b of
+                                    Left num    -> True
+                                    Right bool  -> False
+                    Right bool  -> False
 -}

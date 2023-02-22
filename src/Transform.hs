@@ -12,19 +12,26 @@ import Control.Monad.State -- not used
 import Data.Char(isDigit, isLetter)   -- extract{Num, Func}
 import Data.Map(fromListWith, toList) -- mergeIDefs()
 
--- My custom symbol/state type
+-- My custom symbol == state type
 type Symbol = (String, Int)
 
 {------------------------------ Implementation ------------------------------}
 
--- TODO: Document
+-- TODO:
+--      - Change name of Symbol type
+--      - Handle Function names that have numbers
+
+-- transform: Transform the given FProgram in the following phases:
+--      1. Enumerate function calls, by turning "f" to "f#".
+--      2. Constructs the easy part of the IProgram by flat conversion.
+--      3. Gets all symbols and their params.
+--      4. Extracts actuals for it's above param per function.
 transform :: FProgram -> IProgram
 transform fp = do
 
     -- 1. Enumerate function calls
     let fpEnum = fcallEnum fp
 
-    -- Let's suppose the above works
     -- 2. Construct initial Intensional Language Tree
     let ip = makeIP fpEnum
 
@@ -114,11 +121,14 @@ mergeIDefs idefs   = do
 mergeActuals :: [IExpr] -> [IExpr] -> [IExpr]
 mergeActuals actuals1 actuals2 = (actuals2 ++ actuals1)
 
--- TODO: Returns an array of [args] per function call
+-- traverseFCall: Returns an array of [args] per function call
+--                  This is the most valuable function, albeit ugly.
+--                  It traverse an FCall and scraps all it's call arguments.
 traverseFCall :: String -> FExpr -> [[IExpr]]
 traverseFCall function fexpr =
     case fexpr of
-        -- 1. TODO
+        -- 1. Keep the args of a matched function in an array i.e [Xarg, Yarg]
+        --     and then recurse into the args to find more stuff.
         FCall func args -> if (function == (extractFunc func))
                             -- get params
                             then [(map fExprToIexpr args)]
@@ -187,7 +197,7 @@ makeIP fdefs = do
 
     return (fname, (fExprToIexpr fexpr))
 
--- fExprToIexpr: faulty camel cased function that turns FExpr to IExpr.
+-- fExprToIexpr: faulsely camel cased function that turns FExpr to IExpr.
 --              Special handling for ICall. Recursive hell.
 fExprToIexpr :: FExpr -> IExpr
 fExprToIexpr fexpr =
@@ -223,7 +233,9 @@ fExprToIexpr fexpr =
                                                     (fExprToIexpr expr2)
                                         )
 
--- TODO: Enumerate all declared functions' calls
+-- fcallEnum: Transforms the FProgram into a linear of [FDefinition],
+--              then it enumerates per function and params present,
+--              and returns the result.
 fcallEnum :: FProgram -> [FDefinition]
 fcallEnum fp = do
 
@@ -242,9 +254,11 @@ fcallEnum fp = do
 
     let muttTotalFdefs = (enumerate totalFdefs symbols)
 
+    -- 5. Return the mutation.
     muttTotalFdefs
 
--- TODO: enumerate is a wrapper of enum
+-- enumerate: is a wrapper of enum, actually handleArrayFExpr.
+--              It must pass the new state to the next computation.
 enumerate :: [FDefinition] -> [String] -> [FDefinition]
 enumerate totalFdefs []               = totalFdefs
 enumerate totalFdefs (symbol:symbols) = do
@@ -256,7 +270,8 @@ enumerate totalFdefs (symbol:symbols) = do
     let (muttFExprs, state) = (handleArrayFExpr totalFExpr (symbol, 0))
 
     -- 3. Reconstruct FDefinitions
-    let len = (length muttFExprs) - 1 -- functional? what is functional?
+    let len = (length muttFExprs) - 1
+    -- functional? what is functional?
     let reconstructFDefs = [(uno, dos, tres) | it <- [0 .. len],
                         let uno = (fst3 (totalFdefs !! it)),
                         let dos = (snd3 (totalFdefs !! it)),

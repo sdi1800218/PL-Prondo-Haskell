@@ -28,3 +28,6 @@ run:
 clean:
 	$(call eye_candy, CLEANING)
 	rm -f *.hi *.o $(EXEC)
+
+deliver:
+	git archive --format=zip --output Pantazis_Harry_1115201800218.zip main
