@@ -30,4 +30,4 @@ clean:
 	rm -f *.hi *.o $(EXEC)
 
 deliver:
-	git archive --format=zip --output Pantazis_Harry_1115201800218.zip main
+	git archive --format=zip --output Pantazis_Harry_1115201800218.zip master

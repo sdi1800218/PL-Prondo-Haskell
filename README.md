@@ -1,7 +1,6 @@
 # Project :: MiniHaskell
 AM:       1115201800218
 
-Handle:   Pantazis Harry
 
 - [x] Transform
 - [x] Eval
